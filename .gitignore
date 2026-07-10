@@ -1,0 +1,43 @@
+# OS generated
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.venv/
+
+# IDEs
+.idea/
+.vscode/
+
+# Environment
+.env
+
+# Data
+/data/database/*.sqlite
+/data/database/*.db
+/data/inbox/*
+!/data/inbox/README.md
+/data/attachments/*
+!/data/attachments/README.md
+/data/exports/*
+!/data/exports/README.md
+/data/backups/*
+!/data/backups/README.md
+/data/processed/*
+!/data/processed/README.md
+
+# Runtime
+/logs/*
+!/logs/.gitkeep
+!/logs/README.md
+/temp/*
+!/temp/.gitkeep
+!/temp/README.md
+/cache/*
+!/cache/.gitkeep
+!/cache/README.md
