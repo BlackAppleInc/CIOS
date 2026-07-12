@@ -1,6 +1,7 @@
 import unittest
 from datetime import datetime
 from domain.opportunity import OpportunityCase, OpportunityStatus
+from domain.lifecycle import LifecycleException
 
 class TestOpportunityCase(unittest.TestCase):
     def setUp(self):
@@ -24,24 +25,25 @@ class TestOpportunityCase(unittest.TestCase):
             OpportunityCase("1", "Title", "  ", OpportunityStatus.Detected, 1.0, {}, self.now, self.now)
 
     def test_advance_status_linear_progression(self):
-        self.opportunity.advance_status(OpportunityStatus.Evaluating)
+        self.opportunity.transition_to(OpportunityStatus.Evaluating)
         self.assertEqual(self.opportunity.status, OpportunityStatus.Evaluating)
         
-        self.opportunity.advance_status(OpportunityStatus.Preparing)
+        self.opportunity.transition_to(OpportunityStatus.Preparing)
         self.assertEqual(self.opportunity.status, OpportunityStatus.Preparing)
 
     def test_advance_status_backwards_transition_raises_error(self):
-        self.opportunity.advance_status(OpportunityStatus.Preparing)
+        self.opportunity.transition_to(OpportunityStatus.Evaluating)
+        self.opportunity.transition_to(OpportunityStatus.Preparing)
         
-        with self.assertRaises(ValueError):
-            self.opportunity.advance_status(OpportunityStatus.Evaluating)
+        with self.assertRaises(LifecycleException):
+            self.opportunity.transition_to(OpportunityStatus.Evaluating)
 
     def test_advance_status_to_closed_from_any_state(self):
-        self.opportunity.advance_status(OpportunityStatus.Closed)
+        self.opportunity.transition_to(OpportunityStatus.Closed)
         self.assertEqual(self.opportunity.status, OpportunityStatus.Closed)
         
         opp2 = OpportunityCase("2", "Title", "Company", OpportunityStatus.Interview, 1.0, {}, self.now, self.now)
-        opp2.advance_status(OpportunityStatus.Closed)
+        opp2.transition_to(OpportunityStatus.Closed)
         self.assertEqual(opp2.status, OpportunityStatus.Closed)
 
 if __name__ == '__main__':
