@@ -1,0 +1,6 @@
+{
+  "target_roles": ["Senior Python Developer", "Lead Backend Engineer", "Software Architect"],
+  "required_salary": "$150,000+",
+  "preferred_industries": ["AI", "Fintech", "Healthtech"],
+  "non_negotiables": ["Remote work", "No legacy codebases", "Strong engineering culture"]
+}
