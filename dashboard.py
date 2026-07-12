@@ -247,7 +247,7 @@ def view_agenda(repo):
         
     console.print(table)
 
-def sync_email(repo):
+def sync_email(repo, mark_read: bool = False):
     console = Console()
     console.print("[cyan]Connecting to IMAP Server to sync emails...[/cyan]")
     
@@ -272,13 +272,16 @@ def sync_email(repo):
             deduplicator=deduplicator
         )
         
-        results = pipeline.ingest_batch(adapter)
+        results = pipeline.ingest_batch(adapter, mark_read=mark_read)
         
         if not results:
             console.print("[green]Inbox zero! No new unread opportunities to sync.[/green]")
             return
             
+        total_attachments = sum(len(opp.raw_ingestion_data.get("metadata", {}).get("attachments", [])) for opp in results)
+            
         console.print(f"\n[bold green]Successfully ingested {len(results)} new opportunities from email![/bold green]")
+        console.print(f"[bold green]Total attachments dropped to data/inbox/: {total_attachments}[/bold green]")
         for opp in results:
             console.print(f"- [cyan]{opp.id}[/cyan] | {opp.title} at {opp.company}")
             
@@ -582,7 +585,8 @@ def main():
     
     subparsers.add_parser("agenda", help="View all pending reminders across all active cases")
     
-    subparsers.add_parser("sync-email", help="Sync unread opportunities directly from the configured IMAP inbox")
+    sync_email_parser = subparsers.add_parser("sync-email", help="Sync unread opportunities directly from the configured IMAP inbox")
+    sync_email_parser.add_argument("--mark-read", action="store_true", help="Mark emails as read after processing")
     
     attach_parser = subparsers.add_parser("attach", help="Attach a local file/CV to an opportunity")
     attach_parser.add_argument("id", type=str, help="The Business ID of the opportunity")
@@ -646,7 +650,7 @@ def main():
     elif args.command == "agenda":
         view_agenda(repo)
     elif args.command == "sync-email":
-        sync_email(repo)
+        sync_email(repo, mark_read=args.mark_read)
     elif args.command == "attach":
         attach_document(repo, args.id, args.file_path, args.type)
     elif args.command == "analytics":

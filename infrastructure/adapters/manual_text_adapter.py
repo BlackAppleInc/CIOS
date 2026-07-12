@@ -1,8 +1,14 @@
-from typing import Any
-from core.ports.input_adapter import IInputAdapter
+from typing import Any, List
+from core.ports.input_adapter import IInputAdapter, RawPayload
 
 class ManualTextAdapter(IInputAdapter):
-    def process(self, raw_data: Any) -> str:
+    def collect(self, **kwargs) -> List[RawPayload]:
+        raw_data = kwargs.get("raw_data")
         if not isinstance(raw_data, str):
-            raise ValueError("ManualTextAdapter expects a string payload")
-        return raw_data.strip()
+            raise ValueError("ManualTextAdapter expects a string payload in raw_data")
+        
+        return [{
+            "source": "manual",
+            "metadata": {},
+            "content": raw_data.strip()
+        }]

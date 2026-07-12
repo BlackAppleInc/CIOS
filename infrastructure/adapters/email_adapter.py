@@ -4,29 +4,43 @@ import email
 from email.policy import default
 import re
 from typing import Any, List
-from core.ports.input_adapter import IInputAdapter
+from core.ports.input_adapter import IInputAdapter, RawPayload
 
 class EmailAdapter(IInputAdapter):
-    def process(self, raw_data: Any = None) -> List[str]:
-        # raw_data is ignored, we pull from env vars
+    def collect(self, **kwargs) -> List[RawPayload]:
         username = os.getenv("IMAP_USERNAME")
         password = os.getenv("IMAP_PASSWORD")
         server = os.getenv("IMAP_SERVER")
+        port = int(os.getenv("IMAP_PORT", "993"))
         folder = os.getenv("IMAP_FOLDER", "INBOX")
 
         if not all([username, password, server]):
             raise ValueError("IMAP credentials (IMAP_USERNAME, IMAP_PASSWORD, IMAP_SERVER) are missing from environment variables.")
 
+        mark_read = kwargs.get("mark_read", False)
+        subject_filter = kwargs.get("subject_filter")
+
+        # Build search criteria without hardcoding UNSEEN unless provided in kwargs or if we have to default.
+        # Requirements state "no hardcoded filters". We will construct from kwargs.
+        search_criteria = []
+        if subject_filter:
+            search_criteria.extend(['SUBJECT', f'"{subject_filter}"'])
+        
+        # If no criteria provided, default to UNSEEN to prevent downloading the entire mailbox.
+        if not search_criteria:
+            search_criteria = ['UNSEEN']
+
         extracted_payloads = []
+        mail = None
         try:
-            mail = imaplib.IMAP4_SSL(server)
+            mail = imaplib.IMAP4_SSL(server, port)
             mail.login(username, password)
             mail.select(folder)
 
-            # Search for unread emails
-            status, messages = mail.search(None, 'UNSEEN')
-            if status != 'OK':
-                mail.logout()
+            # Search emails
+            search_args = ' '.join(search_criteria)
+            status, messages = mail.search(None, search_args)
+            if status != 'OK' or not messages[0]:
                 return []
 
             email_ids = messages[0].split()
@@ -39,45 +53,78 @@ class EmailAdapter(IInputAdapter):
                     if isinstance(response_part, tuple):
                         msg = email.message_from_bytes(response_part[1], policy=default)
                         
-                        # Extract plain text body
-                        body = ""
-                        if msg.is_multipart():
-                            for part in msg.walk():
-                                content_type = part.get_content_type()
-                                content_disposition = str(part.get("Content-Disposition"))
-                                
-                                if content_type == "text/plain" and "attachment" not in content_disposition:
-                                    body = part.get_payload(decode=True)
-                                    if isinstance(body, bytes):
-                                        body = body.decode(part.get_content_charset() or 'utf-8', errors='ignore')
-                                    break
-                        else:
-                            if msg.get_content_type() == "text/plain":
-                                body = msg.get_payload(decode=True)
-                                if isinstance(body, bytes):
-                                    body = body.decode(msg.get_content_charset() or 'utf-8', errors='ignore')
+                        message_id = msg.get("Message-ID", f"unknown_{eid.decode('utf-8')}")
+                        message_id = message_id.strip("<>")
+                        sender = str(msg.get("From", ""))
+                        subject = str(msg.get("Subject", ""))
+                        date = str(msg.get("Date", ""))
+                        
+                        metadata = {
+                            "message_id": message_id,
+                            "sender": sender,
+                            "subject": subject,
+                            "date": date,
+                            "attachments": []
+                        }
 
+                        # Extract plain text body and save attachments
+                        body = ""
+                        for part in msg.walk():
+                            content_type = part.get_content_type()
+                            content_disposition = str(part.get("Content-Disposition"))
+                            
+                            if "attachment" in content_disposition:
+                                if part.get_content_maintype() == 'application' and part.get_content_subtype() == 'pdf':
+                                    payload = part.get_payload(decode=True)
+                                    if payload:
+                                        os.makedirs("data/inbox", exist_ok=True)
+                                        attachment_path = f"data/inbox/email_{message_id}_attachment.pdf"
+                                        with open(attachment_path, "wb") as f:
+                                            f.write(payload)
+                                        metadata["attachments"].append(attachment_path)
+                                continue
+
+                            if not body and content_type == "text/plain":
+                                extracted = part.get_payload(decode=True)
+                                if isinstance(extracted, bytes):
+                                    extracted = extracted.decode(part.get_content_charset() or 'utf-8', errors='ignore')
+                                body = extracted
+                        
                         if not body:
-                            # Fallback if only HTML is present (strip tags roughly)
-                            if msg.is_multipart():
-                                for part in msg.walk():
-                                    if part.get_content_type() == "text/html":
-                                        html = part.get_payload(decode=True)
-                                        if isinstance(html, bytes):
-                                            html = html.decode(part.get_content_charset() or 'utf-8', errors='ignore')
-                                        body = re.sub(r'<[^>]+>', ' ', html)
-                                        break
-                            elif msg.get_content_type() == "text/html":
-                                html = msg.get_payload(decode=True)
-                                if isinstance(html, bytes):
-                                    html = html.decode(msg.get_content_charset() or 'utf-8', errors='ignore')
-                                body = re.sub(r'<[^>]+>', ' ', html)
+                            # Fallback if only HTML is present
+                            for part in msg.walk():
+                                if part.get_content_type() == "text/html":
+                                    html = part.get_payload(decode=True)
+                                    if isinstance(html, bytes):
+                                        html = html.decode(part.get_content_charset() or 'utf-8', errors='ignore')
+                                    body = re.sub(r'<[^>]+>', ' ', html)
+                                    break
 
                         if body:
-                            extracted_payloads.append(body.strip())
+                            extracted_payloads.append({
+                                "source": "email",
+                                "metadata": metadata,
+                                "content": body.strip()
+                            })
                             
-            mail.logout()
+                            # Apply mark-read if configured
+                            if mark_read:
+                                mail.store(eid, '+FLAGS', '\\Seen')
+                            else:
+                                # Ensure we don't accidentally mark as read because of fetch
+                                mail.store(eid, '-FLAGS', '\\Seen')
+                                
         except Exception as e:
             raise ValueError(f"Email sync failed: {e}")
+        finally:
+            if mail:
+                try:
+                    mail.close()
+                except Exception:
+                    pass
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
 
         return extracted_payloads

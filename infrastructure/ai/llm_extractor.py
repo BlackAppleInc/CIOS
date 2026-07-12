@@ -12,7 +12,11 @@ class GeminiAIExtractor(IAIExtractor):
             raise ValueError("GEMINI_API_KEY environment variable is missing")
         self.client = genai.Client(api_key=api_key)
 
-    def extract_opportunity(self, raw_text: str) -> dict:
+    def extract_opportunity(self, raw_text: str, metadata: dict = None) -> dict:
+        metadata_context = ""
+        if metadata:
+            metadata_context = f"\nMetadata Context:\n{json.dumps(metadata, indent=2)}\n"
+            
         prompt = f"""
 You are an expert HR data extraction assistant.
 Extract the opportunity details from the following raw text and return a strictly valid JSON object.
@@ -33,7 +37,7 @@ Expected JSON schema:
   ],
   "notes": "Any other context or notes (string)"
 }}
-
+{metadata_context}
 Raw text to extract from:
 ---
 {raw_text}

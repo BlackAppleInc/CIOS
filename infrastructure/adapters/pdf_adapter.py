@@ -1,14 +1,16 @@
 import os
-from typing import Any
+from typing import Any, List
 from pypdf import PdfReader
-from core.ports.input_adapter import IInputAdapter
+from core.ports.input_adapter import IInputAdapter, RawPayload
 
 class PdfAdapter(IInputAdapter):
-    def process(self, raw_data: Any) -> str:
+    def collect(self, **kwargs) -> List[RawPayload]:
         """
-        Expects raw_data to be a valid file path to a PDF.
-        Extracts text and returns it.
+        Expects kwargs to contain a 'raw_data' which is a valid file path to a PDF.
+        Extracts text and returns it in a RawPayload.
         """
+        raw_data = kwargs.get("raw_data")
+        
         if not isinstance(raw_data, str) or not os.path.exists(raw_data):
             raise ValueError(f"PdfAdapter expects a valid file path, got: {raw_data}")
             
@@ -28,4 +30,8 @@ class PdfAdapter(IInputAdapter):
         if not extracted_text:
             raise ValueError("No text could be extracted from the PDF")
             
-        return "\n".join(extracted_text)
+        return [{
+            "source": "pdf",
+            "metadata": {"file_path": raw_data},
+            "content": "\n".join(extracted_text)
+        }]

@@ -1,7 +1,7 @@
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
-from core.ports.input_adapter import IInputAdapter
+from core.ports.input_adapter import IInputAdapter, RawPayload
 from typing import Any, Union, List
 
 class _TextExtractor(HTMLParser):
@@ -34,7 +34,8 @@ class UrlAdapter(IInputAdapter):
     """
     Ingests raw text from direct job posting URLs to feed the unified AI Extraction pipeline.
     """
-    def process(self, raw_data: Any) -> Union[str, List[str]]:
+    def collect(self, **kwargs) -> List[RawPayload]:
+        raw_data = kwargs.get("url") or kwargs.get("raw_data")
         url = str(raw_data).strip()
         if not url.startswith("http"):
             url = "https://" + url
@@ -54,6 +55,10 @@ class UrlAdapter(IInputAdapter):
             # Simple cleanup of excessive newlines
             lines = [line.strip() for line in text.split('\n')]
             cleaned_text = '\n'.join([line for line in lines if line])
-            return cleaned_text
+            return [{
+                "source": "url",
+                "metadata": {"url": url},
+                "content": cleaned_text
+            }]
         except urllib.error.URLError as e:
             raise ValueError(f"Failed to fetch URL {url}: {e}")

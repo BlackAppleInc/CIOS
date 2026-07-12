@@ -24,35 +24,32 @@ class IngestionPipeline:
         self.scorer = scorer
         self.deduplicator = deduplicator
 
-    def ingest(self, adapter: IInputAdapter, raw_data: any) -> OpportunityCase:
-        raw_text = adapter.process(raw_data)
-        if isinstance(raw_text, list):
-            # If adapter returns a list but single ingest called, just take the first one or fail.
-            if raw_text:
-                raw_text = raw_text[0]
-            else:
-                raise ValueError("Adapter returned empty list on single ingest.")
-        return self._ingest_single(raw_text)
+    def ingest(self, adapter: IInputAdapter, **kwargs) -> OpportunityCase:
+        payloads = adapter.collect(**kwargs)
+        if payloads:
+            return self._ingest_single(payloads[0])
+        raise ValueError("Adapter returned empty list on single ingest.")
         
-    def ingest_batch(self, adapter: IInputAdapter, raw_data: any = None) -> list[OpportunityCase]:
-        raw_texts = adapter.process(raw_data)
-        if not isinstance(raw_texts, list):
-            raw_texts = [raw_texts]
+    def ingest_batch(self, adapter: IInputAdapter, **kwargs) -> list[OpportunityCase]:
+        payloads = adapter.collect(**kwargs)
             
         results = []
-        for text in raw_texts:
-            if text and text.strip():
-                results.append(self._ingest_single(text))
+        for payload in payloads:
+            if payload.get("content") and payload["content"].strip():
+                results.append(self._ingest_single(payload))
         return results
 
-    def _ingest_single(self, raw_text: str) -> OpportunityCase:
+    def _ingest_single(self, payload: dict) -> OpportunityCase:
+        raw_text = payload.get("content", "")
+        metadata = payload.get("metadata", {})
+        
         # Step 2: AI Extractor & Normalization
         try:
-            extracted_json = self.ai_extractor.extract_opportunity(raw_text)
-            opportunity_case = DomainNormalizer.normalize(extracted_json, raw_text)
+            extracted_json = self.ai_extractor.extract_opportunity(raw_text, metadata=metadata)
+            opportunity_case = DomainNormalizer.normalize(extracted_json, raw_text, metadata=metadata)
         except Exception as e:
             logger.error(f"AI Extraction failed: {e}")
-            opportunity_case = DomainNormalizer.fallback(raw_text, str(e))
+            opportunity_case = DomainNormalizer.fallback(raw_text, str(e), metadata=metadata)
             
         # Step 3: Confidence Scoring
         if self.scorer:

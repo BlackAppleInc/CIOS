@@ -5,18 +5,22 @@ from domain.contact import Contact
 
 class DomainNormalizer:
     @staticmethod
-    def normalize(extracted_dict: dict, raw_text: str) -> OpportunityCase:
+    def normalize(extracted_dict: dict, raw_text: str, metadata: dict = None) -> OpportunityCase:
         title = extracted_dict.get("title") or "Unknown Title"
         company = extracted_dict.get("company") or "Unknown Company"
         confidence = extracted_dict.get("confidence_score", 0.5)
         
+        raw_ingestion_data = {"original_raw_text": raw_text, "extracted_json": extracted_dict}
+        if metadata:
+            raw_ingestion_data["metadata"] = metadata
+            
         opportunity = OpportunityCase(
             id=str(uuid.uuid4()),
             title=title,
             company=company,
             status=OpportunityStatus.Detected,
             confidence_score=float(confidence),
-            raw_ingestion_data={"original_raw_text": raw_text, "extracted_json": extracted_dict},
+            raw_ingestion_data=raw_ingestion_data,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -42,14 +46,18 @@ class DomainNormalizer:
         return opportunity
         
     @staticmethod
-    def fallback(raw_text: str, error_msg: str) -> OpportunityCase:
+    def fallback(raw_text: str, error_msg: str, metadata: dict = None) -> OpportunityCase:
+        raw_ingestion_data = {"original_raw_text": raw_text, "error": error_msg}
+        if metadata:
+            raw_ingestion_data["metadata"] = metadata
+            
         return OpportunityCase(
             id=str(uuid.uuid4()),
             title="Unknown Title (AI Failure)",
             company="Unknown Company",
             status=OpportunityStatus.Detected,
             confidence_score=0.0,
-            raw_ingestion_data={"original_raw_text": raw_text, "error": error_msg},
+            raw_ingestion_data=raw_ingestion_data,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
