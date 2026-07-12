@@ -18,16 +18,16 @@ import os
 from datetime import datetime
 
 def get_repository(db_path: str):
-    from infrastructure.database.connection import resolve_db_path
-    db_path = resolve_db_path(db_path)
-    if not os.path.exists(db_path):
-        console = Console()
-        console.print(f"[yellow]Database file '{db_path}' not found. Initializing a fresh database...[/yellow]")
-        from infrastructure.database.migrations import run_idempotent_initialization
-        run_idempotent_initialization(db_path)
-        console.print(f"[bold green]Successfully initialized fresh database at '{db_path}'.[/bold green]")
-        
     conn_manager = DatabaseConnectionManager(db_path)
+    resolved_path = conn_manager.db_path
+    
+    if not os.path.exists(resolved_path):
+        console = Console()
+        console.print(f"[yellow]Database file '{resolved_path}' not found. Initializing a fresh database...[/yellow]")
+        from infrastructure.database.migrations import run_idempotent_initialization
+        run_idempotent_initialization(resolved_path)
+        console.print(f"[bold green]Successfully initialized fresh database at '{resolved_path}'.[/bold green]")
+        
     return SqliteOpportunityRepository(conn_manager)
 
 def list_opportunities(repo, status_filter: Optional[str] = None):

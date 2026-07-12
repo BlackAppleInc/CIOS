@@ -41,3 +41,8 @@ __pycache__/
 /cache/*
 !/cache/.gitkeep
 !/cache/README.md
+
+test_cios.db
+data/cios.db
+*.db
+
