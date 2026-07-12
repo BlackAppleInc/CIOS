@@ -7,7 +7,7 @@ from contextlib import contextmanager
 def resolve_db_path(explicit_path: str = None) -> str:
     if explicit_path:
         return explicit_path
-    env = os.environ.get("CIOS_ENV", "production").lower()
+    env = os.environ.get("CIOS_ENV", "").strip().lower()
     if env == "test":
         return "test_cios.db"
     return "data/cios.db"

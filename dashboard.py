@@ -282,8 +282,6 @@ def sync_email(repo):
         for opp in results:
             console.print(f"- [cyan]{opp.id}[/cyan] | {opp.title} at {opp.company}")
             
-    except ValueError as e:
-        console.print("[bold green]URL successfully synced and ingested![/bold green]")
     except Exception as e:
         console.print(f"[bold red]Sync failed:[/bold red] {e}")
 
