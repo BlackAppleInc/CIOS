@@ -295,6 +295,33 @@ def sync_email(repo, mark_read: bool = False, subject: str = None):
     except Exception as e:
         console.print(f"[bold red]Sync failed:[/bold red] {e}")
 
+def add_opportunity(repo, title: str, company: str, status_str: str):
+    console = Console()
+    try:
+        status = OpportunityStatus(status_str)
+    except ValueError:
+        valid_statuses = [s.value for s in OpportunityStatus]
+        console.print(f"[bold red]Invalid status '{status_str}'. Valid options are: {', '.join(valid_statuses)}[/bold red]")
+        return
+        
+    from domain.opportunity import OpportunityCase
+    opp = OpportunityCase(
+        id=str(uuid.uuid4()),
+        title=title,
+        company=company,
+        status=status,
+        confidence_score=1.0,
+        raw_ingestion_data={"source": "manual"},
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+    
+    try:
+        repo.save(opp)
+        console.print(f"[bold green]Successfully added manual opportunity '{title}' at '{company}' (ID: {opp.id})[/bold green]")
+    except Exception as e:
+        console.print(f"[bold red]Failed to save opportunity:[/bold red] {e}")
+
 def prepare_audit():
     console = Console()
     console.print("[cyan]Preparing codebase snapshot for audit...[/cyan]")
@@ -596,6 +623,11 @@ def main():
     sync_email_parser.add_argument("--mark-read", action="store_true", help="Mark emails as read after processing")
     sync_email_parser.add_argument("--subject", type=str, default=None, help="Filter emails by subject keyword before AI extraction (reduces API usage on obvious noise)")
     
+    add_opp_parser = subparsers.add_parser("add-opportunity", help="Manually add an opportunity without AI processing")
+    add_opp_parser.add_argument("--title", type=str, required=True, help="Job title")
+    add_opp_parser.add_argument("--company", type=str, required=True, help="Company name")
+    add_opp_parser.add_argument("--status", type=str, required=True, help="Current status (e.g., Detected, Applied, Interview)")
+    
     attach_parser = subparsers.add_parser("attach", help="Attach a local file/CV to an opportunity")
     attach_parser.add_argument("id", type=str, help="The Business ID of the opportunity")
     attach_parser.add_argument("file_path", type=str, help="The local file path to the document")
@@ -659,6 +691,8 @@ def main():
         view_agenda(repo)
     elif args.command == "sync-email":
         sync_email(repo, mark_read=args.mark_read, subject=args.subject)
+    elif args.command == "add-opportunity":
+        add_opportunity(repo, args.title, args.company, args.status)
     elif args.command == "attach":
         attach_document(repo, args.id, args.file_path, args.type)
     elif args.command == "analytics":
