@@ -28,6 +28,8 @@ Expected JSON schema:
   "title": "Job Title (string, null if not a job opportunity)",
   "company": "Company Name (string, null if not a job opportunity)",
   "confidence_score": 0.0 to 1.0 (float),
+  "source_platform": "Origin platform string (e.g., 'LinkedIn', 'Tecoloco', 'Computrabajo', 'Direct Email', etc., null if not detected. Deduce by checking email domain or sender in metadata context and terms in raw text)",
+  "expires_at": "Application deadline or expiration date in YYYY-MM-DD format (string, null if not found)",
   "contacts": [
     {{
       "first_name": "string",

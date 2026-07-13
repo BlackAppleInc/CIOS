@@ -13,6 +13,18 @@ class DomainNormalizer:
         raw_ingestion_data = {"original_raw_text": raw_text, "extracted_json": extracted_dict}
         if metadata:
             raw_ingestion_data["metadata"] = metadata
+
+        expires_at_val = None
+        expires_str = extracted_dict.get("expires_at")
+        if expires_str:
+            for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    expires_at_val = datetime.strptime(str(expires_str).strip(), fmt)
+                    break
+                except ValueError:
+                    continue
+
+        source_platform = extracted_dict.get("source_platform")
             
         opportunity = OpportunityCase(
             id=str(uuid.uuid4()),
@@ -22,7 +34,9 @@ class DomainNormalizer:
             confidence_score=float(confidence),
             raw_ingestion_data=raw_ingestion_data,
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
+            expires_at=expires_at_val,
+            source_platform=source_platform
         )
         
         contacts = extracted_dict.get("contacts", [])

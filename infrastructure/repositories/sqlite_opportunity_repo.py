@@ -10,6 +10,23 @@ from domain.company import Company
 from core.ports.repository import IRepository
 from infrastructure.database.connection import DatabaseConnectionManager
 
+def _parse_expires_at(val) -> Optional[datetime]:
+    if not val:
+        return None
+    if isinstance(val, datetime):
+        return val
+    val_str = str(val).strip()
+    try:
+        return datetime.fromisoformat(val_str)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(val_str, fmt)
+        except ValueError:
+            continue
+    return None
+
 class SqliteOpportunityRepository(IRepository[OpportunityCase]):
     def __init__(self, connection_manager: DatabaseConnectionManager):
         self.conn_manager = connection_manager
@@ -173,15 +190,23 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
     def save(self, opportunity: OpportunityCase) -> None:
         insert_query = """
             INSERT INTO opportunity_cases (
-                business_id, company_id, title, status, confidence_score, raw_ingestion_data, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                business_id, company_id, title, status, confidence_score, raw_ingestion_data,
+                created_at, updated_at,
+                location, salary_min, salary_max, expires_at, experience_required, source_platform
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(business_id) DO UPDATE SET
                 company_id=excluded.company_id,
                 title=excluded.title,
                 status=excluded.status,
                 confidence_score=excluded.confidence_score,
                 raw_ingestion_data=excluded.raw_ingestion_data,
-                updated_at=excluded.updated_at
+                updated_at=excluded.updated_at,
+                location=excluded.location,
+                salary_min=excluded.salary_min,
+                salary_max=excluded.salary_max,
+                expires_at=excluded.expires_at,
+                experience_required=excluded.experience_required,
+                source_platform=excluded.source_platform
         """
         with self.conn_manager.get_connection() as conn:
             cursor = conn.cursor()
@@ -191,6 +216,8 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
             if not isinstance(raw_data, str) and raw_data is not None:
                 raw_data = json.dumps(raw_data)
 
+            expires_str = opportunity.expires_at.strftime("%Y-%m-%d") if isinstance(opportunity.expires_at, datetime) else opportunity.expires_at
+
             cursor.execute(insert_query, (
                 opportunity.id,
                 company_id,
@@ -199,7 +226,13 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
                 opportunity.confidence_score,
                 raw_data,
                 opportunity.created_at.isoformat(),
-                opportunity.updated_at.isoformat()
+                opportunity.updated_at.isoformat(),
+                opportunity.location,
+                opportunity.salary_min,
+                opportunity.salary_max,
+                expires_str,
+                opportunity.experience_required,
+                opportunity.source_platform,
             ))
 
             cursor.execute("SELECT id FROM opportunity_cases WHERE business_id = ?", (opportunity.id,))
@@ -326,7 +359,12 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
 
     def get_by_business_id(self, business_id: str) -> Optional[OpportunityCase]:
         query = """
-            SELECT oc.*, c.name as company_name 
+            SELECT oc.business_id, oc.title, oc.status, oc.confidence_score,
+                   oc.raw_ingestion_data, oc.created_at, oc.updated_at,
+                   oc.location, oc.salary_min, oc.salary_max, oc.expires_at, oc.experience_required,
+                   oc.id as internal_id,
+                   c.name as company_name,
+                   oc.source_platform
             FROM opportunity_cases oc
             LEFT JOIN companies c ON oc.company_id = c.id
             WHERE oc.business_id = ?
@@ -339,25 +377,32 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
             if not row:
                 return None
 
-            opp_internal_id = row[0]
-            company_name = row[9] or ""
+            opp_internal_id = row[12]   # internal_id
+            company_name    = row[13] or ""
+            source_platform_val = row[14] if len(row) > 14 else None
 
             raw_data = None
-            if row[6]:
+            if row[4]:
                 try:
-                    raw_data = json.loads(row[6])
+                    raw_data = json.loads(row[4])
                 except (json.JSONDecodeError, TypeError):
-                    raw_data = row[6]
+                    raw_data = row[4]
 
             opp = OpportunityCase(
-                id=row[1],
-                title=row[3] or "",
+                id=row[0],
+                title=row[1] or "",
                 company=company_name,
-                status=OpportunityStatus(row[4]),
-                confidence_score=row[5],
+                status=OpportunityStatus(row[2]),
+                confidence_score=row[3],
                 raw_ingestion_data=raw_data,
-                created_at=datetime.fromisoformat(row[7]),
-                updated_at=datetime.fromisoformat(row[8])
+                created_at=datetime.fromisoformat(row[5]),
+                updated_at=datetime.fromisoformat(row[6]),
+                location=row[7],
+                salary_min=row[8],
+                salary_max=row[9],
+                expires_at=_parse_expires_at(row[10]),
+                experience_required=row[11],
+                source_platform=source_platform_val,
             )
 
             opp.interactions = self._get_interactions(cursor, opp_internal_id)
@@ -373,9 +418,14 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
             cursor = conn.cursor()
             cursor.execute("DELETE FROM opportunity_cases WHERE business_id = ?", (business_id,))
 
-    def get_all(self, status: Optional[OpportunityStatus] = None) -> List[OpportunityCase]:
+    def get_all(self, status: Optional[OpportunityStatus] = None, sort_by: Optional[str] = None) -> List[OpportunityCase]:
         query = """
-            SELECT oc.*, c.name as company_name 
+            SELECT oc.business_id, oc.title, oc.status, oc.confidence_score,
+                   oc.raw_ingestion_data, oc.created_at, oc.updated_at,
+                   oc.location, oc.salary_min, oc.salary_max, oc.expires_at, oc.experience_required,
+                   oc.id as internal_id,
+                   c.name as company_name,
+                   oc.source_platform
             FROM opportunity_cases oc
             LEFT JOIN companies c ON oc.company_id = c.id
         """
@@ -384,6 +434,9 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
             query += " WHERE oc.status = ?"
             params.append(status.value)
 
+        if sort_by == "expires_at":
+            query += " ORDER BY oc.expires_at IS NULL, oc.expires_at ASC"
+
         with self.conn_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(query, params)
@@ -391,25 +444,32 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
 
             results = []
             for row in rows:
-                opp_internal_id = row[0]
-                company_name = row[9] or ""
+                opp_internal_id = row[12]   # internal_id
+                company_name    = row[13] or ""
+                source_platform_val = row[14] if len(row) > 14 else None
 
                 raw_data = None
-                if row[6]:
+                if row[4]:
                     try:
-                        raw_data = json.loads(row[6])
+                        raw_data = json.loads(row[4])
                     except (json.JSONDecodeError, TypeError):
-                        raw_data = row[6]
+                        raw_data = row[4]
 
                 opp = OpportunityCase(
-                    id=row[1],
-                    title=row[3] or "",
+                    id=row[0],
+                    title=row[1] or "",
                     company=company_name,
-                    status=OpportunityStatus(row[4]),
-                    confidence_score=row[5],
+                    status=OpportunityStatus(row[2]),
+                    confidence_score=row[3],
                     raw_ingestion_data=raw_data,
-                    created_at=datetime.fromisoformat(row[7]),
-                    updated_at=datetime.fromisoformat(row[8])
+                    created_at=datetime.fromisoformat(row[5]),
+                    updated_at=datetime.fromisoformat(row[6]),
+                    location=row[7],
+                    salary_min=row[8],
+                    salary_max=row[9],
+                    expires_at=_parse_expires_at(row[10]),
+                    experience_required=row[11],
+                    source_platform=source_platform_val,
                 )
 
                 opp.interactions = self._get_interactions(cursor, opp_internal_id)
@@ -534,7 +594,13 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
 
     def search(self, keyword: str) -> List[OpportunityCase]:
         query = """
-            SELECT DISTINCT oc.*, c.name as company_name 
+            SELECT DISTINCT
+                   oc.business_id, oc.title, oc.status, oc.confidence_score,
+                   oc.raw_ingestion_data, oc.created_at, oc.updated_at,
+                   oc.location, oc.salary_min, oc.salary_max, oc.expires_at, oc.experience_required,
+                   oc.id as internal_id,
+                   c.name as company_name,
+                   oc.source_platform
             FROM opportunity_cases oc
             LEFT JOIN companies c ON oc.company_id = c.id
             LEFT JOIN interactions i ON oc.id = i.opportunity_id
@@ -555,25 +621,32 @@ class SqliteOpportunityRepository(IRepository[OpportunityCase]):
 
             results = []
             for row in rows:
-                opp_internal_id = row[0]
-                company_name = row[9] or ""
+                opp_internal_id = row[12]   # internal_id
+                company_name    = row[13] or ""
+                source_platform_val = row[14] if len(row) > 14 else None
 
                 raw_data = None
-                if row[6]:
+                if row[4]:
                     try:
-                        raw_data = json.loads(row[6])
+                        raw_data = json.loads(row[4])
                     except (json.JSONDecodeError, TypeError):
-                        raw_data = row[6]
+                        raw_data = row[4]
 
                 opp = OpportunityCase(
-                    id=row[1],
-                    title=row[3] or "",
+                    id=row[0],
+                    title=row[1] or "",
                     company=company_name,
-                    status=OpportunityStatus(row[4]),
-                    confidence_score=row[5],
+                    status=OpportunityStatus(row[2]),
+                    confidence_score=row[3],
                     raw_ingestion_data=raw_data,
-                    created_at=datetime.fromisoformat(row[7]),
-                    updated_at=datetime.fromisoformat(row[8])
+                    created_at=datetime.fromisoformat(row[5]),
+                    updated_at=datetime.fromisoformat(row[6]),
+                    location=row[7],
+                    salary_min=row[8],
+                    salary_max=row[9],
+                    expires_at=_parse_expires_at(row[10]),
+                    experience_required=row[11],
+                    source_platform=source_platform_val,
                 )
 
                 opp.interactions = self._get_interactions(cursor, opp_internal_id)

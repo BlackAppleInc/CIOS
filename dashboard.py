@@ -33,8 +33,8 @@ def get_repository(db_path: str):
         
     return SqliteOpportunityRepository(conn_manager)
 
-def list_opportunities(repo, status_filter: Optional[str] = None):
-    console = Console()
+def list_opportunities(repo, status_filter: Optional[str] = None, sort_by: Optional[str] = None, verbose: bool = False):
+    console = Console(width=100)
     status_enum = None
     if status_filter:
         try:
@@ -43,29 +43,73 @@ def list_opportunities(repo, status_filter: Optional[str] = None):
             console.print(f"[bold red]Error:[/bold red] Invalid status '{status_filter}'. Valid statuses are: {[s.value for s in OpportunityStatus]}")
             return
 
-    opportunities = repo.get_all(status=status_enum)
+    opportunities = repo.get_all(status=status_enum, sort_by=sort_by)
     
     if not opportunities:
         console.print("[yellow]No opportunities found matching criteria.[/yellow]")
         return
         
-    table = Table(title="Opportunity Cases Dashboard")
-    
-    table.add_column("ID (Business ID)", justify="left", style="cyan", no_wrap=True)
-    table.add_column("Title", style="magenta")
-    table.add_column("Company", style="green")
-    table.add_column("Score", justify="right", style="blue")
-    table.add_column("Status", justify="right", style="bold yellow")
-    
-    for opp in opportunities:
-        score_str = f"{opp.confidence_score * 100:.0f}%" if opp.confidence_score is not None else "N/A"
-        table.add_row(
-            str(opp.id),
-            opp.title,
-            opp.company,
-            score_str,
-            opp.status.value
-        )
+    if verbose:
+        table = Table(title="Opportunity Cases Dashboard (Verbose)")
+        table.add_column("ID (Business ID)", justify="left", style="cyan", no_wrap=True)
+        table.add_column("Title", style="magenta")
+        table.add_column("Company", style="green")
+        table.add_column("Location", style="white")
+        table.add_column("Salary Range", justify="right", style="blue")
+        table.add_column("Experience", style="white")
+        table.add_column("Expires", justify="right", style="dim")
+        table.add_column("Platform", style="yellow")
+        table.add_column("Score", justify="right", style="blue")
+        table.add_column("Status", justify="right", style="bold yellow")
+        
+        for opp in opportunities:
+            score_str = f"{opp.confidence_score * 100:.0f}%" if opp.confidence_score is not None else "N/A"
+            if opp.salary_min is not None or opp.salary_max is not None:
+                lo = f"${opp.salary_min:,.0f}" if opp.salary_min else "?"
+                hi = f"${opp.salary_max:,.0f}" if opp.salary_max else "?"
+                salary_str = f"{lo} – {hi}"
+            else:
+                salary_str = "N/A"
+            expires_str = opp.expires_at.strftime("%Y-%m-%d") if isinstance(opp.expires_at, datetime) else (opp.expires_at or "—")
+            table.add_row(
+                str(opp.id),
+                opp.title,
+                opp.company,
+                opp.location or "—",
+                salary_str,
+                opp.experience_required or "—",
+                expires_str,
+                opp.source_platform or "—",
+                score_str,
+                opp.status.value
+            )
+    else:
+        table = Table(title="Opportunity Cases Dashboard")
+        table.add_column("Title", style="magenta", no_wrap=True)
+        table.add_column("Company", style="green", no_wrap=True)
+        table.add_column("Status", style="bold yellow")
+        table.add_column("Expires", justify="right", style="dim")
+        
+        for opp in opportunities:
+            title_str = opp.title if len(opp.title) <= 35 else opp.title[:34] + "…"
+            company_str = opp.company if len(opp.company) <= 20 else opp.company[:19] + "…"
+            
+            if isinstance(opp.expires_at, datetime):
+                expires_str = opp.expires_at.strftime("%d/%m/%Y")
+            elif isinstance(opp.expires_at, str) and opp.expires_at:
+                try:
+                    expires_str = datetime.strptime(opp.expires_at, "%Y-%m-%d").strftime("%d/%m/%Y")
+                except ValueError:
+                    expires_str = opp.expires_at
+            else:
+                expires_str = "—"
+                
+            table.add_row(
+                title_str,
+                company_str,
+                opp.status.value,
+                expires_str
+            )
         
     console.print(table)
     console.print(f"\n[dim]Total Cases: {len(opportunities)}[/dim]")
@@ -89,6 +133,20 @@ def view_opportunity(repo, business_id: str):
     details_text.append(f"Confidence Score: ", style="bold")
     score_str = f"{opp.confidence_score * 100:.0f}%" if opp.confidence_score is not None else "N/A"
     details_text.append(f"{score_str}\n", style="blue")
+    details_text.append(f"Location: ", style="bold")
+    details_text.append(f"{opp.location or '—'}\n")
+    if opp.salary_min is not None or opp.salary_max is not None:
+        lo = f"${opp.salary_min:,.0f}" if opp.salary_min else "?"
+        hi = f"${opp.salary_max:,.0f}" if opp.salary_max else "?"
+        salary_str = f"{lo} – {hi}"
+    else:
+        salary_str = "—"
+    details_text.append(f"Salary Range: ", style="bold")
+    details_text.append(f"{salary_str}\n", style="green")
+    details_text.append(f"Experience Required: ", style="bold")
+    details_text.append(f"{opp.experience_required or '—'}\n")
+    details_text.append(f"Expires: ", style="bold")
+    details_text.append(f"{opp.expires_at or '—'}\n")
     
     console.print(Panel(details_text, title=f"Opportunity: {opp.id}", border_style="cyan"))
     
@@ -295,7 +353,11 @@ def sync_email(repo, mark_read: bool = False, subject: str = None):
     except Exception as e:
         console.print(f"[bold red]Sync failed:[/bold red] {e}")
 
-def add_opportunity(repo, title: str, company: str, status_str: str):
+def add_opportunity(repo, title: str, company: str, status_str: str,
+                    location: Optional[str] = None, salary_min: Optional[float] = None,
+                    salary_max: Optional[float] = None, expires_at: Optional[str] = None,
+                    experience_required: Optional[str] = None,
+                    source_platform: Optional[str] = None):
     console = Console()
     try:
         status = OpportunityStatus(status_str)
@@ -313,7 +375,13 @@ def add_opportunity(repo, title: str, company: str, status_str: str):
         confidence_score=1.0,
         raw_ingestion_data={"source": "manual"},
         created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        updated_at=datetime.utcnow(),
+        location=location,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        expires_at=expires_at,
+        experience_required=experience_required,
+        source_platform=source_platform,
     )
     
     try:
@@ -605,6 +673,8 @@ def main():
     
     list_parser = subparsers.add_parser("list", help="List all opportunities")
     list_parser.add_argument("--status", type=str, default=None, help="Filter opportunities by status")
+    list_parser.add_argument("--sort-by", type=str, default=None, choices=["expires_at"], help="Sort opportunities natively in SQLite by database column")
+    list_parser.add_argument("--verbose", action="store_true", help="Show expanded view with salary, location, expiry, and experience columns")
     
     search_parser = subparsers.add_parser("search", help="Search across critical text fields")
     search_parser.add_argument("keyword", type=str, help="The search keyword")
@@ -627,6 +697,12 @@ def main():
     add_opp_parser.add_argument("--title", type=str, required=True, help="Job title")
     add_opp_parser.add_argument("--company", type=str, required=True, help="Company name")
     add_opp_parser.add_argument("--status", type=str, required=True, help="Current status (e.g., Detected, Applied, Interview)")
+    add_opp_parser.add_argument("--location", type=str, default=None, help="Job location (city, country, or Remote)")
+    add_opp_parser.add_argument("--salary-min", type=float, default=None, help="Minimum salary")
+    add_opp_parser.add_argument("--salary-max", type=float, default=None, help="Maximum salary")
+    add_opp_parser.add_argument("--expires", type=str, default=None, help="Application deadline (YYYY-MM-DD)")
+    add_opp_parser.add_argument("--experience", type=str, default=None, help="Experience requirement (e.g., '5+ years Python')")
+    add_opp_parser.add_argument("--source-platform", type=str, default=None, help="Platform source (e.g., 'LinkedIn', 'Tecoloco')")
     
     attach_parser = subparsers.add_parser("attach", help="Attach a local file/CV to an opportunity")
     attach_parser.add_argument("id", type=str, help="The Business ID of the opportunity")
@@ -678,7 +754,7 @@ def main():
     repo = get_repository(args.db)
     
     if args.command == "list":
-        list_opportunities(repo, args.status)
+        list_opportunities(repo, args.status, sort_by=args.sort_by, verbose=args.verbose)
     elif args.command == "search":
         search_opportunities(repo, args.keyword)
     elif args.command == "view":
@@ -692,7 +768,11 @@ def main():
     elif args.command == "sync-email":
         sync_email(repo, mark_read=args.mark_read, subject=args.subject)
     elif args.command == "add-opportunity":
-        add_opportunity(repo, args.title, args.company, args.status)
+        add_opportunity(repo, args.title, args.company, args.status,
+                        location=args.location, salary_min=args.salary_min,
+                        salary_max=args.salary_max, expires_at=args.expires,
+                        experience_required=args.experience,
+                        source_platform=args.source_platform)
     elif args.command == "attach":
         attach_document(repo, args.id, args.file_path, args.type)
     elif args.command == "analytics":

@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS opportunity_cases (
         confidence_score IS NULL OR (confidence_score >= 0.0 AND confidence_score <= 1.0)
     ),
     raw_ingestion_data JSON,
+    location TEXT,
+    salary_min REAL,
+    salary_max REAL,
+    expires_at DATE,
+    experience_required TEXT,
+    source_platform VARCHAR,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE SET NULL

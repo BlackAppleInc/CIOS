@@ -107,6 +107,14 @@ class OpportunityCase:
     documents: List[Document] = field(default_factory=list)
     offers: List[Offer] = field(default_factory=list)
 
+    # Structured detail fields (optional — all default to None for backward-compat)
+    location: Optional[str] = None
+    salary_min: Optional[float] = None
+    salary_max: Optional[float] = None
+    expires_at: Optional[datetime] = None
+    experience_required: Optional[str] = None
+    source_platform: Optional[str] = None
+
     def __post_init__(self):
         if not self.title or not str(self.title).strip():
             raise ValueError("Title cannot be empty")
