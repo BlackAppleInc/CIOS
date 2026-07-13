@@ -12,7 +12,7 @@ class GeminiProvider(ILLMProvider):
 
     def generate_text(self, prompt: str) -> str:
         response = self.client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-flash-latest',
             contents=prompt,
         )
         return response.text.strip()
@@ -22,7 +22,7 @@ class GeminiProvider(ILLMProvider):
         gemini_schema = self._translate_schema(schema)
         
         response = self.client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-flash-latest',
             contents=prompt,
             config={'response_mime_type': 'application/json', 'response_schema': gemini_schema}
         )

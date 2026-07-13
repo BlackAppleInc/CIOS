@@ -20,15 +20,10 @@ class EmailAdapter(IInputAdapter):
         mark_read = kwargs.get("mark_read", False)
         subject_filter = kwargs.get("subject_filter")
 
-        # Build search criteria without hardcoding UNSEEN unless provided in kwargs or if we have to default.
-        # Requirements state "no hardcoded filters". We will construct from kwargs.
-        search_criteria = []
+        # Always default to UNSEEN to prevent downloading the entire mailbox.
+        search_criteria = ['UNSEEN']
         if subject_filter:
             search_criteria.extend(['SUBJECT', f'"{subject_filter}"'])
-        
-        # If no criteria provided, default to UNSEEN to prevent downloading the entire mailbox.
-        if not search_criteria:
-            search_criteria = ['UNSEEN']
 
         extracted_payloads = []
         mail = None

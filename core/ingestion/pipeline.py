@@ -5,6 +5,7 @@ from core.ports.input_adapter import IInputAdapter
 from core.ports.ai_extractor import IAIExtractor
 from core.ports.repository import IRepository
 from domain.opportunity import OpportunityCase, Interaction, InteractionType
+from typing import Optional
 from core.ingestion.normalizer import DomainNormalizer
 from core.intelligence.scorer import OpportunityScorer
 from core.ingestion.deduplicator import DuplicateDetector
@@ -34,22 +35,59 @@ class IngestionPipeline:
         payloads = adapter.collect(**kwargs)
             
         results = []
-        for payload in payloads:
+        fail_count = 0
+        skipped_count = 0
+        
+        import time
+        from rich.console import Console
+        console = Console()
+        
+        for i, payload in enumerate(payloads):
+            if i > 0:
+                time.sleep(13) # Rate limit safety
+                
             if payload.get("content") and payload["content"].strip():
-                results.append(self._ingest_single(payload))
+                try:
+                    res = self._ingest_single(payload)
+                    if res is None:
+                        skipped_count += 1
+                        subject = payload.get("metadata", {}).get("subject", "Unknown Subject")
+                        console.print(f"[bold cyan]Skipped (not job-related):[/bold cyan] '{subject}'")
+                    else:
+                        results.append(res)
+                except Exception as e:
+                    fail_count += 1
+                    subject = payload.get("metadata", {}).get("subject", "Unknown Subject")
+                    sender = payload.get("metadata", {}).get("sender", "Unknown Sender")
+                    console.print(f"[bold red]Extraction Failed:[/bold red] '{subject}' from '{sender}'. Error: {e}")
+                    
+        total = len(payloads)
+        if total > 0:
+            console.print(f"\n[bold yellow]Batch Summary:[/bold yellow] {total} emails read, {len(results)} ingested, {fail_count} failed extraction, {skipped_count} skipped (not job-related) — see log above")
+            
         return results
 
-    def _ingest_single(self, payload: dict) -> OpportunityCase:
+    def _ingest_single(self, payload: dict) -> Optional[OpportunityCase]:
         raw_text = payload.get("content", "")
         metadata = payload.get("metadata", {})
         
         # Step 2: AI Extractor & Normalization
-        try:
-            extracted_json = self.ai_extractor.extract_opportunity(raw_text, metadata=metadata)
-            opportunity_case = DomainNormalizer.normalize(extracted_json, raw_text, metadata=metadata)
-        except Exception as e:
-            logger.error(f"AI Extraction failed: {e}")
-            opportunity_case = DomainNormalizer.fallback(raw_text, str(e), metadata=metadata)
+        extracted_json = self.ai_extractor.extract_opportunity(raw_text, metadata=metadata)
+        
+        is_job = extracted_json.get("is_job_opportunity")
+        title = extracted_json.get("title")
+        company = extracted_json.get("company")
+        
+        if is_job is False:
+            return None
+            
+        if not title and not company:
+            return None
+            
+        if title in [None, "", "Unknown Title", "Unknown"] and company in [None, "", "Unknown Company", "Unknown", "Google"]:
+            return None
+            
+        opportunity_case = DomainNormalizer.normalize(extracted_json, raw_text, metadata=metadata)
             
         # Step 3: Confidence Scoring
         if self.scorer:

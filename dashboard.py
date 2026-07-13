@@ -1,4 +1,7 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
 import argparse
 import json
 from rich.console import Console
@@ -247,7 +250,7 @@ def view_agenda(repo):
         
     console.print(table)
 
-def sync_email(repo, mark_read: bool = False):
+def sync_email(repo, mark_read: bool = False, subject: str = None):
     console = Console()
     console.print("[cyan]Connecting to IMAP Server to sync emails...[/cyan]")
     
@@ -272,7 +275,11 @@ def sync_email(repo, mark_read: bool = False):
             deduplicator=deduplicator
         )
         
-        results = pipeline.ingest_batch(adapter, mark_read=mark_read)
+        kwargs = {"mark_read": mark_read}
+        if subject:
+            kwargs["subject_filter"] = subject
+            
+        results = pipeline.ingest_batch(adapter, **kwargs)
         
         if not results:
             console.print("[green]Inbox zero! No new unread opportunities to sync.[/green]")
@@ -587,6 +594,7 @@ def main():
     
     sync_email_parser = subparsers.add_parser("sync-email", help="Sync unread opportunities directly from the configured IMAP inbox")
     sync_email_parser.add_argument("--mark-read", action="store_true", help="Mark emails as read after processing")
+    sync_email_parser.add_argument("--subject", type=str, default=None, help="Filter emails by subject keyword before AI extraction (reduces API usage on obvious noise)")
     
     attach_parser = subparsers.add_parser("attach", help="Attach a local file/CV to an opportunity")
     attach_parser.add_argument("id", type=str, help="The Business ID of the opportunity")
@@ -650,7 +658,7 @@ def main():
     elif args.command == "agenda":
         view_agenda(repo)
     elif args.command == "sync-email":
-        sync_email(repo, mark_read=args.mark_read)
+        sync_email(repo, mark_read=args.mark_read, subject=args.subject)
     elif args.command == "attach":
         attach_document(repo, args.id, args.file_path, args.type)
     elif args.command == "analytics":

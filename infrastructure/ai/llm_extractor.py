@@ -24,8 +24,9 @@ Do NOT include markdown formatting, backticks, or any explanation around the JSO
 
 Expected JSON schema:
 {{
-  "title": "Job Title (string)",
-  "company": "Company Name (string)",
+  "is_job_opportunity": boolean (true if this is a job posting/offer, false otherwise),
+  "title": "Job Title (string, null if not a job opportunity)",
+  "company": "Company Name (string, null if not a job opportunity)",
   "confidence_score": 0.0 to 1.0 (float),
   "contacts": [
     {{
@@ -37,6 +38,9 @@ Expected JSON schema:
   ],
   "notes": "Any other context or notes (string)"
 }}
+
+IMPORTANT: If the email is clearly NOT a job opportunity (e.g., security alerts, newsletters, receipts, generic notices), set "is_job_opportunity" to false and leave title and company empty or null.
+
 {metadata_context}
 Raw text to extract from:
 ---
@@ -44,7 +48,7 @@ Raw text to extract from:
 ---
 """
         response = self.client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-flash-latest',
             contents=prompt,
         )
         text = response.text.strip()
