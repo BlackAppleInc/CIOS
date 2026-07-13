@@ -32,21 +32,34 @@ class IngestionPipeline:
         raise ValueError("Adapter returned empty list on single ingest.")
         
     def ingest_batch(self, adapter: IInputAdapter, **kwargs) -> list[OpportunityCase]:
+        mark_read = kwargs.pop("mark_read", False)
         payloads = adapter.collect(**kwargs)
             
         results = []
         fail_count = 0
         skipped_count = 0
+        skipped_sender_count = 0
         
         import time
         from rich.console import Console
         console = Console()
+        
+        NOISE_SENDER_PATTERNS = ["no-reply@accounts.google.com"]
         
         for i, payload in enumerate(payloads):
             if i > 0:
                 time.sleep(13) # Rate limit safety
                 
             if payload.get("content") and payload["content"].strip():
+                sender = payload.get("metadata", {}).get("sender", "").lower()
+                if any(noise in sender for noise in NOISE_SENDER_PATTERNS):
+                    skipped_sender_count += 1
+                    subject = payload.get("metadata", {}).get("subject", "Unknown Subject")
+                    console.print(f"[bold cyan]Skipped (sender filter):[/bold cyan] '{subject}' from '{sender}'")
+                    if mark_read and hasattr(adapter, 'acknowledge'):
+                        adapter.acknowledge(payload)
+                    continue
+
                 try:
                     res = self._ingest_single(payload)
                     if res is None:
@@ -55,15 +68,18 @@ class IngestionPipeline:
                         console.print(f"[bold cyan]Skipped (not job-related):[/bold cyan] '{subject}'")
                     else:
                         results.append(res)
+                        
+                    if mark_read and hasattr(adapter, 'acknowledge'):
+                        adapter.acknowledge(payload)
                 except Exception as e:
                     fail_count += 1
                     subject = payload.get("metadata", {}).get("subject", "Unknown Subject")
-                    sender = payload.get("metadata", {}).get("sender", "Unknown Sender")
-                    console.print(f"[bold red]Extraction Failed:[/bold red] '{subject}' from '{sender}'. Error: {e}")
+                    error_sender = payload.get("metadata", {}).get("sender", "Unknown Sender")
+                    console.print(f"[bold red]Extraction Failed:[/bold red] '{subject}' from '{error_sender}'. Error: {e}")
                     
         total = len(payloads)
         if total > 0:
-            console.print(f"\n[bold yellow]Batch Summary:[/bold yellow] {total} emails read, {len(results)} ingested, {fail_count} failed extraction, {skipped_count} skipped (not job-related) — see log above")
+            console.print(f"\n[bold yellow]Batch Summary:[/bold yellow] {total} emails read, {len(results)} ingested, {fail_count} failed extraction, {skipped_count} skipped (not job-related), {skipped_sender_count} skipped (sender filter) — see log above")
             
         return results
 

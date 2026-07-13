@@ -16,3 +16,7 @@ class IInputAdapter(ABC):
     def collect(self, **kwargs) -> List[RawPayload]:
         """Collects the raw external data and returns payloads for the pipeline."""
         pass
+
+    def acknowledge(self, payload: RawPayload) -> None:
+        """Called by the pipeline when a payload is successfully processed or permanently skipped."""
+        pass

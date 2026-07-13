@@ -17,7 +17,6 @@ class EmailAdapter(IInputAdapter):
         if not all([username, password, server]):
             raise ValueError("IMAP credentials (IMAP_USERNAME, IMAP_PASSWORD, IMAP_SERVER) are missing from environment variables.")
 
-        mark_read = kwargs.get("mark_read", False)
         subject_filter = kwargs.get("subject_filter")
 
         # Always default to UNSEEN to prevent downloading the entire mailbox.
@@ -34,13 +33,13 @@ class EmailAdapter(IInputAdapter):
 
             # Search emails
             search_args = ' '.join(search_criteria)
-            status, messages = mail.search(None, search_args)
+            status, messages = mail.uid('SEARCH', None, search_args)
             if status != 'OK' or not messages[0]:
                 return []
 
             email_ids = messages[0].split()
             for eid in email_ids:
-                res, msg_data = mail.fetch(eid, '(RFC822)')
+                res, msg_data = mail.uid('FETCH', eid, '(RFC822)')
                 if res != 'OK':
                     continue
 
@@ -56,6 +55,7 @@ class EmailAdapter(IInputAdapter):
                         
                         metadata = {
                             "message_id": message_id,
+                            "imap_uid": eid.decode('utf-8'),
                             "sender": sender,
                             "subject": subject,
                             "date": date,
@@ -101,13 +101,8 @@ class EmailAdapter(IInputAdapter):
                                 "metadata": metadata,
                                 "content": body.strip()
                             })
-                            
-                            # Apply mark-read if configured
-                            if mark_read:
-                                mail.store(eid, '+FLAGS', '\\Seen')
-                            else:
-                                # Ensure we don't accidentally mark as read because of fetch
-                                mail.store(eid, '-FLAGS', '\\Seen')
+                            # Ensure we don't accidentally mark as read because of fetch
+                            mail.uid('STORE', eid, '-FLAGS', '\\Seen')
                                 
         except Exception as e:
             raise ValueError(f"Email sync failed: {e}")
@@ -123,3 +118,33 @@ class EmailAdapter(IInputAdapter):
                     pass
 
         return extracted_payloads
+
+    def acknowledge(self, payload: RawPayload) -> None:
+        uid = payload.get("metadata", {}).get("imap_uid")
+        if not uid:
+            return
+            
+        username = os.getenv("IMAP_USERNAME")
+        password = os.getenv("IMAP_PASSWORD")
+        server = os.getenv("IMAP_SERVER")
+        port = int(os.getenv("IMAP_PORT", "993"))
+        folder = os.getenv("IMAP_FOLDER", "INBOX")
+
+        mail = None
+        try:
+            mail = imaplib.IMAP4_SSL(server, port)
+            mail.login(username, password)
+            mail.select(folder)
+            mail.uid('STORE', uid.encode('utf-8'), '+FLAGS', '\\Seen')
+        except Exception:
+            pass
+        finally:
+            if mail:
+                try:
+                    mail.close()
+                except Exception:
+                    pass
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
